@@ -1,7 +1,7 @@
+#include <cstdio>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-/* You will to add includes here */
+#include <string>
 
 // Included to get the support library
 #include "calcLib.h"
@@ -10,24 +10,32 @@
 // Alternative, pass CFLAGS=-DDEBUG to make, make CFLAGS=-DDEBUG
 #define DEBUG
 
-using namespace std;
+struct HostAddress {
+  std::string host;
+  int port;
+};
+
+HostAddress parse_ip_addr(const std::string addr) {
+  HostAddress address;
+
+  size_t colonPos = addr.find_last_of(':');
+
+  if (addr[0] == '[') {
+    // For ipv6 address, [2001:0db8:85a3:0000:0000:8a2e:0370:7334]:8080
+    address.host = addr.substr(1, colonPos - 2);
+    address.port = stoi(addr.substr(colonPos + 1));
+  } else {
+    address.host = addr.substr(0, colonPos);
+    address.port = stoi(addr.substr(colonPos + 1));
+  }
+
+  return address;
+}
 
 int main(int argc, char *argv[]) {
+  HostAddress address = parse_ip_addr(argv[1]);
 
-  /*
-    Read first input, assumes <ip>:<port> syntax, convert into one string
-    (Desthost) and one integer (port). Atm, works only on dotted notation, i.e.
-    IPv4 and DNS. IPv6 does not work if its using ':'.
-  */
-  char delim[] = ":";
-  char *Desthost = strtok(argv[1], delim);
-  char *Destport = strtok(NULL, delim);
-  // *Desthost now points to a sting holding whatever came before the delimiter,
-  // ':'. *Dstport points to whatever string came after the delimiter.
-
-  /* Do magic */
-  int port = atoi(Destport);
 #ifdef DEBUG
-  printf("Host %s, and port %d.\n", Desthost, port);
+  printf("Host %s, and port %d.\n", address.host.c_str(), address.port);
 #endif
 }
