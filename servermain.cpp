@@ -15,7 +15,7 @@ struct HostAddress {
   int port;
 };
 
-HostAddress parse_ip_addr(const std::string addr) {
+HostAddress parse_address(const std::string addr) {
   HostAddress address;
 
   size_t colonPos = addr.find_last_of(':');
@@ -33,7 +33,7 @@ HostAddress parse_ip_addr(const std::string addr) {
 }
 
 int main(int argc, char *argv[]) {
-  HostAddress address = parse_ip_addr(argv[1]);
+  HostAddress address = parse_address(argv[1]);
 
 #ifdef DEBUG
   printf("Host %s, and port %d.\n", address.host.c_str(), address.port);
