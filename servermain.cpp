@@ -1,5 +1,7 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <iostream>
+#include <unistd.h>
 
 #include "calcLib.h"
 
@@ -51,6 +53,67 @@ int start_server(int port, int max_clients) {
   // Listen for incoming connections
   listen(server_socket, max_clients);
 
+  int client_sockets[max_clients];
+  for (int i = 0; i < max_clients; i++) {
+    client_sockets[i] = 0;
+  }
+
+  fcntl(server_socket, F_SETFL, O_NONBLOCK);
+
+  fd_set read_fds, temp_fds;
+  FD_ZERO(&read_fds);               // Clear the read_fds set
+  FD_SET(server_socket, &read_fds); // Add server socket to read_fds set
+
+  int max_fd = server_socket;
+
+  struct sockaddr_in client_addr;
+  while (true) {
+    temp_fds = read_fds;
+    int activity = select(max_fd + 1, &temp_fds, NULL, NULL, NULL);
+
+    if ((activity < 0) && (errno != EINTR)) {
+      std::cerr << "Error in select" << std::endl;
+      return -1;
+    }
+
+    if (FD_ISSET(server_socket, &temp_fds)) {
+      int new_socket;
+      socklen_t addr_len = sizeof(client_addr);
+      new_socket =
+          accept(server_socket, (struct sockaddr *)&client_addr, &addr_len);
+      if (new_socket < 0) {
+        std::cerr << "Error accepting incoming connection" << std::endl;
+        return -1;
+      }
+
+      // Add new socket to client_sockets array
+      bool busy = false;
+      for (int i = 0; i < max_clients; i++) {
+        if (client_sockets[i] == 0) {
+          client_sockets[i] = new_socket;
+          break;
+        }
+        if (i == max_clients - 1)
+          busy = true;
+      }
+
+      if (busy) {
+        char reject_msg[] = "Rejected by server.";
+        send(new_socket, reject_msg, sizeof(reject_msg), 0);
+        close(new_socket);
+        FD_CLR(new_socket, &read_fds);
+        continue;
+      }
+
+      // Add new socket to read_fds set
+      FD_SET(new_socket, &read_fds);
+
+      if (new_socket > max_fd) {
+        max_fd = new_socket;
+      }
+    }
+  }
+
   return 0;
 }
 
@@ -61,7 +124,7 @@ int main(int argc, char *argv[]) {
   printf("Host %s, and port %d.\n", address.host.c_str(), address.port);
 #endif
 
-  int status = start_server(address.port, 10);
+  int status = start_server(address.port, 2);
 
   return 0;
 }
