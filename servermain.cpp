@@ -48,6 +48,27 @@ void send_task(int client) {
   send(client, command, strlen(command), 0);
 }
 
+void disconnect_client(std::queue<int> &q, int client, fd_set *read_fds) {
+  std::queue<int> temp;
+
+  while (!q.empty()) {
+    int front = q.front();
+    q.pop();
+
+    if (front != client)
+      temp.push(front);
+  }
+
+  while (!temp.empty()) {
+    q.push(temp.front());
+    temp.pop();
+  }
+
+  std::cout << "fuck";
+  FD_CLR(client, read_fds);
+  close(client);
+}
+
 int start_server(int port, int max_clients) {
   // Create server socket
   int server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -120,6 +141,23 @@ int start_server(int port, int max_clients) {
 
       if (new_socket > max_fd) {
         max_fd = new_socket;
+      }
+    }
+
+    // Find which client trigger an event
+    std::queue<int> temp = client_sockets;
+    while (!temp.empty()) {
+      char buffer[BUFFER_SIZE] = {};
+      int client_socket = temp.front();
+      temp.pop();
+      if (FD_ISSET(client_socket, &temp_fds)) {
+        int valread = read(client_socket, buffer, BUFFER_SIZE);
+        if (valread == 0) {
+          // Client disconnected
+          disconnect_client(client_sockets, client_socket, &read_fds);
+        } else {
+          printf("Client[%d]: %s", client_socket, buffer);
+        }
       }
     }
   }
