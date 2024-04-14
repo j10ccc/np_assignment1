@@ -1,14 +1,10 @@
-#include <cstdio>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string>
+#include <arpa/inet.h>
+#include <iostream>
 
-// Included to get the support library
 #include "calcLib.h"
 
-// Enable if you want debugging to be printed, see examble below.
-// Alternative, pass CFLAGS=-DDEBUG to make, make CFLAGS=-DDEBUG
 #define DEBUG
+#define BUFFER_SIZE 1024
 
 struct HostAddress {
   std::string host;
@@ -32,10 +28,40 @@ HostAddress parse_address(const std::string addr) {
   return address;
 }
 
+int start_server(int port, int max_clients) {
+  // Create server socket
+  int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_socket == -1) {
+    std::cerr << "Error creating server socket" << std::endl;
+    return -1;
+  }
+
+  struct sockaddr_in server_addr;
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_addr.s_addr = INADDR_ANY;
+  server_addr.sin_port = htons(port);
+
+  // Bind server socket to port
+  if (bind(server_socket, (struct sockaddr *)&server_addr,
+           sizeof(server_addr)) < 0) {
+    std::cerr << "Bind failed" << std::endl;
+    return -1;
+  }
+
+  // Listen for incoming connections
+  listen(server_socket, max_clients);
+
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   HostAddress address = parse_address(argv[1]);
 
 #ifdef DEBUG
   printf("Host %s, and port %d.\n", address.host.c_str(), address.port);
 #endif
+
+  int status = start_server(address.port, 10);
+
+  return 0;
 }
