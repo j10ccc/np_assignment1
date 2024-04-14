@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <queue>
+#include <thread>
 #include <unistd.h>
 
 #include "calcLib.h"
@@ -29,6 +30,22 @@ HostAddress parse_address(const std::string addr) {
   }
 
   return address;
+}
+
+void send_task(int client) {
+  char *op = randomType();
+  char command[50] = {};
+
+  double fv1, fv2, fresult;
+  int iv1, iv2, iresult;
+
+  if (op[0] == 'f') {
+    snprintf(command, 50, "%s %8.8g %8.8g\n", op, randomFloat(), randomFloat());
+  } else {
+    snprintf(command, 50, "%s %d %d\n", op, randomInt(), randomInt());
+  }
+
+  send(client, command, strlen(command), 0);
 }
 
 int start_server(int port, int max_clients) {
@@ -94,6 +111,8 @@ int start_server(int port, int max_clients) {
         continue;
       } else {
         client_sockets.push(new_socket);
+        std::thread t(send_task, new_socket);
+        t.detach();
       }
 
       // Add new socket to read_fds set
