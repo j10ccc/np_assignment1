@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <iostream>
+#include <queue>
 #include <unistd.h>
 
 #include "calcLib.h"
@@ -53,10 +54,8 @@ int start_server(int port, int max_clients) {
   // Listen for incoming connections
   listen(server_socket, max_clients);
 
-  int client_sockets[max_clients];
-  for (int i = 0; i < max_clients; i++) {
-    client_sockets[i] = 0;
-  }
+  // int client_sockets[max_clients];
+  std::queue<int> client_sockets;
 
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
 
@@ -86,23 +85,15 @@ int start_server(int port, int max_clients) {
         return -1;
       }
 
-      // Add new socket to client_sockets array
-      bool busy = false;
-      for (int i = 0; i < max_clients; i++) {
-        if (client_sockets[i] == 0) {
-          client_sockets[i] = new_socket;
-          break;
-        }
-        if (i == max_clients - 1)
-          busy = true;
-      }
-
-      if (busy) {
+      // Add new socket to client_sockets queue
+      if (client_sockets.size() >= max_clients) {
         char reject_msg[] = "Rejected by server.";
         send(new_socket, reject_msg, sizeof(reject_msg), 0);
         close(new_socket);
         FD_CLR(new_socket, &read_fds);
         continue;
+      } else {
+        client_sockets.push(new_socket);
       }
 
       // Add new socket to read_fds set
