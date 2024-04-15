@@ -10,6 +10,7 @@
 #define DEBUG
 #define BUFFER_SIZE 1024
 #define MAX_CLIENTS 2
+#define TIMEOUT 5
 
 struct HostAddress {
   std::string host;
@@ -43,6 +44,26 @@ HostAddress parse_address(const std::string addr) {
   }
 
   return address;
+}
+
+void disconnect_client(int client) {
+  std::queue<int> temp;
+
+  while (!client_sockets.empty()) {
+    int front = client_sockets.front();
+    client_sockets.pop();
+
+    if (front != client)
+      temp.push(front);
+  }
+
+  while (!temp.empty()) {
+    client_sockets.push(temp.front());
+    temp.pop();
+  }
+
+  FD_CLR(client, &read_fds);
+  close(client);
 }
 
 void send_task(int client) {
@@ -83,27 +104,34 @@ void send_task(int client) {
 
   send(client, command, strlen(command), 0);
 
-  task_mutex.unlock();
+  sleep(TIMEOUT);
+
+  if (pending_task.client == client) {
+    char msg[] = "ERROR TO\n";
+    send(client, msg, strlen(msg), 0);
+    disconnect_client(client);
+    task_mutex.unlock();
+  }
 }
 
-void disconnect_client(int client) {
-  std::queue<int> temp;
-
-  while (!client_sockets.empty()) {
-    int front = client_sockets.front();
-    client_sockets.pop();
-
-    if (front != client)
-      temp.push(front);
+void check_response(char *raw) {
+  try {
+    if (pending_task.type[0] == 'f') {
+      double res = atof(raw);
+      if (abs(res - pending_task.fres) >= 0.0001)
+        throw std::runtime_error("Calculate Error.\n");
+    } else {
+      int res = atoi(raw);
+      if (res != pending_task.ires)
+        throw std::runtime_error("Calculate Error.\n");
+    }
+    char msg[] = "OK\n";
+    send(pending_task.client, msg, strlen(msg), 0);
+  } catch (const std::runtime_error &e) {
+    send(pending_task.client, e.what(), strlen(e.what()), 0);
   }
 
-  while (!temp.empty()) {
-    client_sockets.push(temp.front());
-    temp.pop();
-  }
-
-  FD_CLR(client, &read_fds);
-  close(client);
+  disconnect_client(pending_task.client);
 }
 
 int start_server(int port) {
@@ -144,8 +172,7 @@ int start_server(int port) {
     int activity = select(max_fd + 1, &temp_fds, NULL, NULL, NULL);
 
     if ((activity < 0) && (errno != EINTR)) {
-      std::cerr << "Error in select" << std::endl;
-      return -1;
+      continue;
     }
 
     if (FD_ISSET(server_socket, &temp_fds)) {
@@ -192,6 +219,7 @@ int start_server(int port) {
           disconnect_client(client_socket);
         } else {
           if (pending_task.client == client_socket) {
+            check_response(buffer);
             task_mutex.unlock();
           } else {
             char msg[] = "Waiting...";
