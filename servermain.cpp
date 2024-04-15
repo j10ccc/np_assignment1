@@ -32,20 +32,52 @@ HostAddress parse_address(const std::string addr) {
   return address;
 }
 
-void send_task(int client) {
+struct CalcTask {
+  char *type;
+  int client;
+  int ires;
+  double fres;
+};
+
+void send_task(int client, std::mutex *mutex, CalcTask *task) {
+  mutex->lock();
+
   char *op = randomType();
   char command[50] = {};
-
-  double fv1, fv2, fresult;
-  int iv1, iv2, iresult;
+  task->client = client;
+  task->type = op;
 
   if (op[0] == 'f') {
-    snprintf(command, 50, "%s %8.8g %8.8g\n", op, randomFloat(), randomFloat());
+    double a = randomFloat();
+    double b = randomFloat();
+    if (strncmp(op, "fadd", 3) == 0) {
+      task->fres = a + b;
+    } else if (strncmp(op, "fdiv", 3) == 0) {
+      task->fres = a / b;
+    } else if (strncmp(op, "fmul", 3) == 0) {
+      task->fres = a * b;
+    } else if (strncmp(op, "fsub", 3) == 0) {
+      task->fres = a - b;
+    }
+    snprintf(command, 50, "%s %8.8g %8.8g\n", op, a, b);
   } else {
-    snprintf(command, 50, "%s %d %d\n", op, randomInt(), randomInt());
+    int a = randomInt();
+    int b = randomInt();
+    if (strncmp(op, "add", 3) == 0) {
+      task->ires = a + b;
+    } else if (strncmp(op, "div", 3) == 0) {
+      task->ires = a / b;
+    } else if (strncmp(op, "mul", 3) == 0) {
+      task->ires = a * b;
+    } else if (strncmp(op, "sub", 3) == 0) {
+      task->ires = a - b;
+    }
+    snprintf(command, 50, "%s %d %d\n", op, a, b);
   }
 
   send(client, command, strlen(command), 0);
+
+  mutex->unlock();
 }
 
 void disconnect_client(std::queue<int> &q, int client, fd_set *read_fds) {
@@ -64,7 +96,6 @@ void disconnect_client(std::queue<int> &q, int client, fd_set *read_fds) {
     temp.pop();
   }
 
-  std::cout << "fuck";
   FD_CLR(client, read_fds);
   close(client);
 }
@@ -104,6 +135,9 @@ int start_server(int port, int max_clients) {
   int max_fd = server_socket;
 
   struct sockaddr_in client_addr;
+  std::mutex mutex;
+  CalcTask pending_task;
+
   while (true) {
     temp_fds = read_fds;
     int activity = select(max_fd + 1, &temp_fds, NULL, NULL, NULL);
@@ -132,7 +166,7 @@ int start_server(int port, int max_clients) {
         continue;
       } else {
         client_sockets.push(new_socket);
-        std::thread t(send_task, new_socket);
+        std::thread t(send_task, new_socket, &mutex, &pending_task);
         t.detach();
       }
 
@@ -156,7 +190,12 @@ int start_server(int port, int max_clients) {
           // Client disconnected
           disconnect_client(client_sockets, client_socket, &read_fds);
         } else {
-          printf("Client[%d]: %s", client_socket, buffer);
+          if (pending_task.client == client_socket) {
+            mutex.unlock();
+          } else {
+            char msg[] = "Waiting...";
+            send(client_socket, msg, strlen(msg), 0);
+          }
         }
       }
     }
