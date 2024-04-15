@@ -5,7 +5,7 @@ LD_FLAGS= -Wall -L./
 all: libcalc test client server
 
 servermain.o: servermain.cpp
-	$(CXX)  $(CC_FLAGS) $(CFLAGS) -c servermain.cpp 
+	$(CXX) $(CC_FLAGS) $(CFLAGS) -c servermain.cpp -std=c++11
 
 clientmain.o: clientmain.cpp
 	$(CXX) $(CC_FLAGS) $(CFLAGS) -c clientmain.cpp 
@@ -20,7 +20,7 @@ test: main.o calcLib.o
 client: clientmain.o calcLib.o
 	$(CXX) $(LD_FLAGS) -o client clientmain.o -lcalc
 
-server: servermain.o calcLib.o
+server: servermain.o libcalc
 	$(CXX) $(LD_FLAGS) -o server servermain.o -lcalc
 
 
