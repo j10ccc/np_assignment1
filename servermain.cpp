@@ -17,14 +17,21 @@ struct HostAddress {
   int port;
 };
 
+enum ClientStatusEnum { ProtocolChecking, Waiting, Calculating, Finished };
+
+struct ClientInstance {
+  ClientStatusEnum status;
+  int id;
+};
+
 struct CalcTask {
   char *type;
-  int client;
+  ClientInstance client;
   int ires;
   double fres;
 };
 
-std::queue<int> client_sockets;
+std::queue<ClientInstance> client_sockets;
 fd_set read_fds;
 CalcTask pending_task;
 std::mutex task_mutex;
@@ -46,14 +53,14 @@ HostAddress parse_address(const std::string addr) {
   return address;
 }
 
-void disconnect_client(int client) {
-  std::queue<int> temp;
+void disconnect_client(ClientInstance client) {
+  std::queue<ClientInstance> temp;
 
   while (!client_sockets.empty()) {
-    int front = client_sockets.front();
+    ClientInstance front = client_sockets.front();
     client_sockets.pop();
 
-    if (front != client)
+    if (front.id != client.id)
       temp.push(front);
   }
 
@@ -62,11 +69,12 @@ void disconnect_client(int client) {
     temp.pop();
   }
 
-  FD_CLR(client, &read_fds);
-  close(client);
+  FD_CLR(client.id, &read_fds);
+  close(client.id);
 }
 
-void send_task(int client) {
+void send_task(ClientInstance client) {
+  client.status = Waiting;
   task_mutex.lock();
 
   char *op = randomType();
@@ -102,17 +110,21 @@ void send_task(int client) {
     snprintf(command, 50, "%s %d %d\n", op, a, b);
   }
 
-  send(client, command, strlen(command), 0);
+  send(client.id, command, strlen(command), 0);
+  client.status = Calculating;
 
   sleep(TIMEOUT);
 
-  if (pending_task.client == client) {
+  if (pending_task.client.id == client.id) {
     char msg[] = "ERROR TO\n";
-    send(client, msg, strlen(msg), 0);
+    send(client.id, msg, strlen(msg), 0);
+    client.status = Finished;
     disconnect_client(client);
     task_mutex.unlock();
   }
 }
+
+void handle_connection(int client) {}
 
 void check_response(char *raw) {
   try {
@@ -126,10 +138,12 @@ void check_response(char *raw) {
         throw std::runtime_error("Calculate Error.\n");
     }
     char msg[] = "OK\n";
-    send(pending_task.client, msg, strlen(msg), 0);
+    send(pending_task.client.id, msg, strlen(msg), 0);
   } catch (const std::runtime_error &e) {
-    send(pending_task.client, e.what(), strlen(e.what()), 0);
+    send(pending_task.client.id, e.what(), strlen(e.what()), 0);
   }
+
+  pending_task.client.status = Finished;
 
   disconnect_client(pending_task.client);
 }
@@ -193,8 +207,9 @@ int start_server(int port) {
         FD_CLR(new_socket, &read_fds);
         continue;
       } else {
-        client_sockets.push(new_socket);
-        std::thread t(send_task, new_socket);
+        ClientInstance new_client = {ProtocolChecking, new_socket};
+        client_sockets.push(new_client);
+        std::thread t(send_task, new_client);
         t.detach();
       }
 
@@ -207,23 +222,23 @@ int start_server(int port) {
     }
 
     // Find which client trigger an event
-    std::queue<int> temp = client_sockets;
+    std::queue<ClientInstance> temp = client_sockets;
     while (!temp.empty()) {
       char buffer[BUFFER_SIZE] = {};
-      int client_socket = temp.front();
+      ClientInstance client_socket = temp.front();
       temp.pop();
-      if (FD_ISSET(client_socket, &temp_fds)) {
-        int valread = read(client_socket, buffer, BUFFER_SIZE);
+      if (FD_ISSET(client_socket.id, &temp_fds)) {
+        int valread = read(client_socket.id, buffer, BUFFER_SIZE);
         if (valread == 0) {
           // Client disconnected
           disconnect_client(client_socket);
         } else {
-          if (pending_task.client == client_socket) {
+          if (pending_task.client.id == client_socket.id) {
             check_response(buffer);
             task_mutex.unlock();
           } else {
             char msg[] = "Waiting...";
-            send(client_socket, msg, strlen(msg), 0);
+            send(client_socket.id, msg, strlen(msg), 0);
           }
         }
       }
