@@ -124,7 +124,13 @@ void send_task(ClientInstance client) {
   }
 }
 
-void handle_connection(int client) {}
+void handle_connect(int new_socket) {
+  char msg[] = "TEXT TCP 1.0\n";
+  send(new_socket, msg, strlen(msg), 0);
+
+  ClientInstance new_client = {ProtocolChecking, new_socket};
+  client_sockets.push(new_client);
+}
 
 void check_response(char *raw) {
   try {
@@ -143,9 +149,11 @@ void check_response(char *raw) {
     send(pending_task.client.id, e.what(), strlen(e.what()), 0);
   }
 
-  pending_task.client.status = Finished;
+  ClientInstance client = pending_task.client;
+  client.status = Finished;
+  pending_task = {};
 
-  disconnect_client(pending_task.client);
+  disconnect_client(client);
 }
 
 int start_server(int port) {
@@ -207,10 +215,7 @@ int start_server(int port) {
         FD_CLR(new_socket, &read_fds);
         continue;
       } else {
-        ClientInstance new_client = {ProtocolChecking, new_socket};
-        client_sockets.push(new_client);
-        std::thread t(send_task, new_client);
-        t.detach();
+        handle_connect(new_socket);
       }
 
       // Add new socket to read_fds set
@@ -236,6 +241,13 @@ int start_server(int port) {
           if (pending_task.client.id == client_socket.id) {
             check_response(buffer);
             task_mutex.unlock();
+          } else if (client_socket.status == ProtocolChecking) {
+            if (strcmp(buffer, "OK")) {
+              std::thread t(send_task, client_socket);
+              t.detach();
+            } else {
+              disconnect_client(client_socket);
+            }
           } else {
             char msg[] = "Waiting...";
             send(client_socket.id, msg, strlen(msg), 0);
