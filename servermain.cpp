@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <iostream>
+#include <netdb.h>
 #include <queue>
 #include <thread>
 #include <unistd.h>
@@ -35,23 +36,6 @@ std::queue<ClientInstance> client_sockets;
 fd_set read_fds;
 CalcTask pending_task;
 std::mutex task_mutex;
-
-HostAddress parse_address(const std::string addr) {
-  HostAddress address;
-
-  size_t colonPos = addr.find_last_of(':');
-
-  if (addr[0] == '[') {
-    // For ipv6 address, [2001:0db8:85a3:0000:0000:8a2e:0370:7334]:8080
-    address.host = addr.substr(1, colonPos - 2);
-    address.port = stoi(addr.substr(colonPos + 1));
-  } else {
-    address.host = addr.substr(0, colonPos);
-    address.port = stoi(addr.substr(colonPos + 1));
-  }
-
-  return address;
-}
 
 void disconnect_client(ClientInstance client) {
   std::queue<ClientInstance> temp;
@@ -156,28 +140,49 @@ void check_response(char *raw) {
   disconnect_client(client);
 }
 
-int start_server(int port) {
-  // Create server socket
-  int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_socket == -1) {
-    std::cerr << "Error creating server socket" << std::endl;
+int start_server(const char *addr, const char *port) {
+  struct addrinfo hints, *res, *p;
+  int server_socket;
+
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+
+  if (getaddrinfo(addr, port, &hints, &res) != 0) {
+    std::cerr << "getaddrinfo error" << std::endl;
     return -1;
   }
 
-  struct sockaddr_in server_addr;
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_addr.s_addr = INADDR_ANY;
-  server_addr.sin_port = htons(port);
+  // Iterate
+  for (p = res; p != NULL; p = p->ai_next) {
+    if ((server_socket =
+             socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+      std::cerr << "socket error" << std::endl;
+      continue;
+    }
 
-  // Bind server socket to port
-  if (bind(server_socket, (struct sockaddr *)&server_addr,
-           sizeof(server_addr)) < 0) {
-    std::cerr << "Bind failed" << std::endl;
-    return -1;
+    if (bind(server_socket, p->ai_addr, p->ai_addrlen) == -1) {
+      std::cerr << "Bind error" << std::endl;
+      close(server_socket);
+      continue;
+    }
+
+    break;
   }
 
-  // Listen for incoming connections
-  listen(server_socket, MAX_CLIENTS);
+  if (p == NULL) {
+    std::cerr << "Failed to bind" << std::endl;
+    return 1;
+  }
+
+  if (listen(server_socket, 10) == -1) {
+    std::cerr << "Listen error" << std::endl;
+    return 1;
+  }
+
+  printf("Server started at port %s, support %s\n", port,
+         res->ai_family == AF_INET6 ? "ipv6" : "ipv4");
+  freeaddrinfo(res);
 
   fcntl(server_socket, F_SETFL, O_NONBLOCK);
 
@@ -261,13 +266,10 @@ int start_server(int port) {
 }
 
 int main(int argc, char *argv[]) {
-  HostAddress address = parse_address(argv[1]);
+  char *addr = argv[1];
+  char *port = argv[2];
 
-#ifdef DEBUG
-  printf("Host %s, and port %d.\n", address.host.c_str(), address.port);
-#endif
+  int status = start_server(addr, port);
 
-  int status = start_server(address.port);
-
-  return 0;
+  return status;
 }
