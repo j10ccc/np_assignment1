@@ -247,7 +247,7 @@ int start_server(const char *addr, const char *port) {
             check_response(buffer);
             task_mutex.unlock();
           } else if (client_socket.status == ProtocolChecking) {
-            if (strcmp(buffer, "OK")) {
+            if (strcmp(buffer, "OK\n") == 0) {
               std::thread t(send_task, client_socket);
               t.detach();
             } else {
